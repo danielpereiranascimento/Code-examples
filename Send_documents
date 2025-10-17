@@ -1,0 +1,49 @@
+*==================================================================
+* Generate PDFs and Send Documents via Email
+*==================================================================
+* Seleciona documentos do cliente entre datas, gera PDFs e envia email HTML
+*==================================================================
+
+Local m.caminhoFicheiros, m.tmpval_no, m.tmpval_es, m.tmpval_em
+Local DataIni, DataFim, loRequest, url1, anexo1, url2, anexo2
+Local strSQL
+
+m.caminhoFicheiros = "http://sisreport.wsis.pt/IMAGEM/CLIENTES/PRODOFIBRA/"
+m.tmpval_no = cl.no
+m.tmpval_es = cl.estab
+m.tmpval_em = Alltrim(cl.email)
+
+DataIni = getnome("Data Inicial", Date(), "")
+DataFim = getnome("Data Final", Date(), "")
+
+* Download do cabeçalho e rodapé
+loRequest = Createobject('MsXml2.XmlHttp')
+
+url1 = m.caminhoFicheiros + "Cabecalho_prod_gif.gif"
+anexo1 = Alltrim(Sys(5)+Curdir())+"Cabecalho_prod_gif.gif"
+
+url2 = m.caminhoFicheiros + "Rodape_prod_gif.gif"
+anexo2 = Alltrim(Sys(5)+Curdir())+"Rodape_prod_gif.gif"
+
+loRequest.Open("GET", url1, .F.)
+loRequest.Send()
+Strtofile(loRequest.ResponseBody, anexo1)
+
+loRequest.Open("GET", url2, .F.)
+loRequest.Send()
+Strtofile(loRequest.ResponseBody, anexo2)
+
+* Montar consulta SQL para documentos
+TEXT to strSQL TextMerge NoShow
+    SELECT Sel, ccstamp, datadoc, datavenc, doc, credito, debito, vardoc, vardocl, varEcra,
+           doccampos, doclcampos, docidu, doclidu, docstamp, obs, ndoc, nmdoc, nmdocstr, docno,
+           idunome, idustamp
+    FROM dbo.u_docsemail (<<m.tmpval_no>>, <<m.tmpval_es>>, '<<DataIni>>', '<<DataFim>>')
+    ORDER BY ordem ASC, datadoc ASC, datavenc ASC
+ENDTEXT
+
+If Not u_sqlexec(strSQL, 'cDocs') Or Reccount("cDocs") = 0
+    Msg("NÃO EXISTEM DOCUMENTOS PARA ESTE CLIENTE!")
+Endif
+
+* ... Resto do código para gerar PDF e enviar email permanece igual ...
