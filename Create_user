@@ -1,0 +1,215 @@
+&& Seleção de users
+Text To usSel TextMerge NoShow
+	Select usstamp,username,usercode,iniciais,
+		userno,grupo,dpt,ugstamp,esa,email,
+		Cast(0 As Bit) marcada
+	From us (Nolock) 
+	Where inactivo=0 Order By userno
+EndText
+If !u_sqlexec(usSel,[crsUS])
+	Mensagem('Erro a listar os utilizadores da base de dados'+Chr(13)+Message())
+	Return
+EndIf
+
+Select crsUS
+Declare list_tit(4),list_cam(4),list_tam(4),list_pic(4),list_ronly(4)
+
+list_tit(1)="Nº"
+list_tit(2)="Nome"
+list_tit(3)="Grupo"
+list_tit(4)="Seleção"
+
+list_cam(1)="crsUS.userno"
+list_cam(2)="crsUS.username"
+list_cam(3)="crsUS.grupo"
+list_cam(4)="crsUS.marcada"
+
+list_ronly=.T.
+list_ronly(4)=.F.
+
+list_pic=""
+list_pic(4)="LOGIC"
+
+list_tam=8*12
+list_tam(2)=8*40
+list_tam(3)=8*20 
+
+m.escolheu = .F.
+Browlist('Seleção de utilizadores a gerar','crsUS','listUS',.T.,.F.,.F.,.T.,.F.,'',.t.)
+Release list_tit,list_cam,list_tam,list_pic,list_ronly
+If !m.escolheu
+	Return
+EndIf
+
+&& Seleção de grupos dos users selecionados
+Select Distinct ugstamp,grupo From crsUS Where crsUS.marcada Into Cursor crsUG ReadWrite
+
+&& Seleção de bases de dados
+Text To dbSel TextMerge NoShow
+	Select database_id,name, Cast(0 As Bit) marcada 
+	From sys.databases (Nolock)
+	Where database_id>4
+	Order by database_id
+EndText
+If !u_sqlexec(dbSel,[crsDB])
+	Mensagem('Erro a listar as bases de dados'+Chr(13)+Message())
+	Return	
+EndIf
+
+Select crsDB
+Declare list_tit(2),list_cam(2),list_tam(2),list_pic(2),list_ronly(2)
+
+list_tit(1)="Base Dados"
+list_tit(2)="Seleção"
+
+list_cam(1)="crsDB.name"
+list_cam(2)="crsDB.marcada"
+
+list_ronly=.T.
+list_ronly(2)=.F.
+
+list_pic=""
+list_pic(2)="LOGIC"
+
+list_tam=8*20
+
+m.escolheu = .F.
+Browlist('Seleção de bases de dados','crsDB','listDB',.T.,.F.,.F.,.T.,.F.,'',.t.)
+If !m.escolheu
+	Return
+EndIf
+
+If !Pergunta('Deseja introduzir a informação selecionada',2,'',.T.)
+	Return
+EndIf
+
+&& Processo de introdução de 
+Create Cursor crsLog (BDName C(20), TypeRec C(10), RecCode C(20), Iniciais C(4), Status C(200))
+Create Cursor crsSQLIns (Info C(250))
+
+Select crsDB
+Scan For crsDB.marcada And crsDB.name!=SQL_DB
+	mCtrl = .T.
+	If !u_sqlexec([Select Max(IsNull(userno,0))+1 nextUs From ]+Alltrim(crsDB.name)+[.dbo.us (Nolock)],[crsNUS])
+		mCtrl = .F.
+	EndIf
+	If Reccount([crsNUS])!=1
+		mCtrl = .F.
+	EndIf
+	Select crsNUS
+	If crsNUS.nextUs<=0
+		mCtrl = .F.
+	EndIf
+	
+	If mCtrl
+		Select crsUS
+		Go Top
+		Scan For crsUS.marcada
+		
+			&& Intro US
+			Text To usIns TextMerge NoShow
+				Insert Into <<Alltrim(crsDB.name)>>.dbo.us (usstamp,username,
+					usercode,iniciais,userno,grupo,dpt,ugstamp,esa,email)
+				Values ('<<Alltrim(crsUS.usstamp)>>','<<Alltrim(crsUS.username)>>',
+					'<<Alltrim(crsUS.usercode)>>','<<Alltrim(crsUS.iniciais)>>',
+					<<Astr(crsNUS.nextUs)>>,'<<Alltrim(crsUS.grupo)>>',
+					'<<Alltrim(crsUS.dpt)>>','<<Alltrim(crsUS.ugstamp)>>',
+					<<Astr(Iif(crsUS.esa,1,0))>>,'<<Alltrim(crsUS.email)>>')
+			EndText
+			If u_sqlexec(usIns)
+				proc_insLog(crsDB.name,'User',crsUS.usercode,crsUS.iniciais,Message())
+
+				&& Intro SQL User
+				Text To dbUsrCreat TextMerge NoShow
+					Use [<<Alltrim(crsDB.name)>>]; Create User [<<Alltrim(crsUS.usercode)>>] For Login [<<Alltrim(crsUS.usercode)>>];Exec sp_addrolemember 'db_owner', '<<Alltrim(crsUS.usercode)>>'
+				EndText
+				Select crsSQLIns
+				Append Blank
+				Replace crsSQLIns.Info With 'Use ['+Alltrim(crsDB.name)+']; ' ;
+					+'Create User ['+Alltrim(crsUS.usercode)+'] For Login ['+Alltrim(crsUS.usercode)+']; ' ;
+					+'Exec sp_addrolemember [db_owner],['+Alltrim(crsUS.usercode)+']'
+			Else
+				proc_insLog(crsDB.name,'User',crsUS.usercode,crsUS.iniciais,'ERRO: '+Message())
+				mCtrl = .F.
+			EndIf
+
+			Select crsUS
+		EndScan
+
+		If mCtrl
+			Select crsUG
+			Scan
+					
+				&& Intro UG
+				Text To ugIns TextMerge NoShow
+					Insert Into <<Alltrim(crsDB.name)>>.dbo.ug (ugstamp,nome,pedeprog)
+					Select ugstamp,nome,pedeprog From <<Alltrim(SQL_DB)>>.dbo.ug
+					Where ugstamp = '<<Alltrim(crsUG.ugstamp)>>'
+				EndText
+				If u_sqlexec(ugIns)
+					proc_insLog(crsDB.name,'Group',crsUG.grupo,'',Message())
+				Else
+					proc_insLog(crsDB.name,'Group',crsUG.grupo,'','ERRO: '+Message())
+				EndIf
+				
+				&& Intro UGPROG
+				Text To ugPIns TextMerge NoShow
+					Insert Into <<Alltrim(crsDB.name)>>.dbo.ugprog (ugprogstamp,nomepack,ugstamp)
+					Select ugprogstamp,nomepack,ugstamp From <<Alltrim(SQL_DB)>>.dbo.ugprog
+					Where ugstamp = '<<Alltrim(crsUG.ugstamp)>>'
+				EndText
+				If u_sqlexec(ugPIns)
+					proc_insLog(crsDB.name,'Group Prog',crsUG.grupo,'',Message())
+				Else
+					proc_insLog(crsDB.name,'Group Prog',crsUG.grupo,'','ERRO: '+Message())
+				EndIf
+				
+				&& Intro UGVAL
+				Text To ugVIns TextMerge NoShow
+					Insert Into <<Alltrim(crsDB.name)>>.dbo.ugval (ugvalstamp,nomepack,ugstamp)
+					Select ugvalstamp,nomepack,ugstamp From <<Alltrim(SQL_DB)>>.dbo.ugval
+					Where ugstamp = '<<Alltrim(crsUG.ugstamp)>>'
+				EndText
+				If u_sqlexec(ugVIns)
+					proc_insLog(crsDB.name,'Group Valid',crsUG.grupo,'',Message())
+				Else
+					proc_insLog(crsDB.name,'Group Valid',crsUG.grupo,'','ERRO: '+Message())
+				EndIf
+				
+				&& Intro GMENU
+				Text To gMIns TextMerge NoShow
+					Insert Into <<Alltrim(crsDB.name)>>.dbo.gmenu (gmenustamp,ugstamp,nomemenu)
+					Select gmenustamp,ugstamp,nomemenu From <<Alltrim(SQL_DB)>>.dbo.gmenu
+					Where ugstamp = '<<Alltrim(crsUG.ugstamp)>>'
+				EndText
+				If u_sqlexec(gMIns)
+					proc_insLog(crsDB.name,'Group Perm',crsUG.grupo,'',Message())
+				Else
+					proc_insLog(crsDB.name,'Group Perm',crsUG.grupo,'','ERRO: '+Message())
+				EndIf
+				
+			EndScan	
+		EndIf
+	EndIf
+	
+	Select crsDB
+EndScan
+
+If Reccount([crsLog])>0
+	Mostrameisto([crsLog])
+EndIf
+If Reccount([crsSQLIns])>0
+	Mostrameisto([crsSQLIns])
+EndIf
+
+Procedure proc_insLog
+	Lparameters mDB, mTyp, mRec, mIni, mStat
+	
+	Select crsLog
+	Append Blank
+	Replace crsLog.BDName With mDB, ;
+		crsLog.TypeRec With mTyp, ;
+		crsLog.RecCode With mRec, ;
+		crsLog.Iniciais With mIni, ;
+		crsLog.Status With mStat
+EndProc
