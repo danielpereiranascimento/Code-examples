@@ -1,49 +1,798 @@
-*==================================================================
-* Generate PDFs and Send Documents via Email
-*==================================================================
-* Seleciona documentos do cliente entre datas, gera PDFs e envia email HTML
-*==================================================================
+Local msel, mDtIni, mDtFim, mDocumento, mEnviados, mOpenClient, mQuiet, mDeEmail, mbccEmail, mCabEmail, mLinEmail, mRodEmail, mEmail, mAssunto, mNDoc, mTitulo, mResultado
 
-Local m.caminhoFicheiros, m.tmpval_no, m.tmpval_es, m.tmpval_em
-Local DataIni, DataFim, loRequest, url1, anexo1, url2, anexo2
-Local strSQL
+Create Cursor xVars ( no N(5), tipo c(1), Nome c(40), Pict c(100), lOrdem N(10), nValor N(18,5), cValor c(250), lValor l, dValor d, tBval M )
 
-m.caminhoFicheiros = "http://sisreport.wsis.pt/IMAGEM/CLIENTES/PRODOFIBRA/"
-m.tmpval_no = cl.no
-m.tmpval_es = cl.estab
-m.tmpval_em = Alltrim(cl.email)
+* prencher os dados de cada variavel a pedir
 
-DataIni = getnome("Data Inicial", Date(), "")
-DataFim = getnome("Data Final", Date(), "")
+Select xVars
+Append Blank
+Replace xVars.no With 1
+Replace xVars.tipo With "Q"
+Replace xVars.Nome With "Documento"
+Replace xVars.Pict With ""
+Replace xVars.lOrdem With 1
+Replace xVars.tBval With "select td.nmdoc from td (nolock) where td.fechada = 0 and td.tipodoc in (1,3) order by td.nmdoc"
 
-* Download do cabeçalho e rodapé
-loRequest = Createobject('MsXml2.XmlHttp')
+Select xVars
+Append Blank
+Replace xVars.no With 2
+Replace xVars.tipo With "D"
+Replace xVars.Nome With "Data Inicial"
+Replace xVars.Pict With ""
+Replace xVars.lOrdem With 2
+Replace xVars.dValor With Date()
 
-url1 = m.caminhoFicheiros + "Cabecalho_prod_gif.gif"
-anexo1 = Alltrim(Sys(5)+Curdir())+"Cabecalho_prod_gif.gif"
+Select xVars
+Append Blank
+Replace xVars.no With 3
+Replace xVars.tipo With "D"
+Replace xVars.Nome With "Data Final"
+Replace xVars.Pict With ""
+Replace xVars.lOrdem With 3
+Replace xVars.dValor With Date()
 
-url2 = m.caminhoFicheiros + "Rodape_prod_gif.gif"
-anexo2 = Alltrim(Sys(5)+Curdir())+"Rodape_prod_gif.gif"
+Select xVars
+Append Blank
+Replace xVars.no With 4
+Replace xVars.tipo With "L"
+Replace xVars.Nome With "Apresenta documentos enviados"
+Replace xVars.Pict With ""
+Replace xVars.lOrdem With 4
+Replace xVars.lValor With .F.
 
-loRequest.Open("GET", url1, .F.)
-loRequest.Send()
-Strtofile(loRequest.ResponseBody, anexo1)
+m.Escolheu = .F.
 
-loRequest.Open("GET", url2, .F.)
-loRequest.Send()
-Strtofile(loRequest.ResponseBody, anexo2)
+m.mCaption = "Dados para envio de documentos"
 
-* Montar consulta SQL para documentos
-TEXT to strSQL TextMerge NoShow
-    SELECT Sel, ccstamp, datadoc, datavenc, doc, credito, debito, vardoc, vardocl, varEcra,
-           doccampos, doclcampos, docidu, doclidu, docstamp, obs, ndoc, nmdoc, nmdocstr, docno,
-           idunome, idustamp
-    FROM dbo.u_docsemail (<<m.tmpval_no>>, <<m.tmpval_es>>, '<<DataIni>>', '<<DataFim>>')
-    ORDER BY ordem ASC, datadoc ASC, datavenc ASC
-ENDTEXT
+docomando("do form usqlvar with 'xvars',m.mCaption,.t.")
 
-If Not u_sqlexec(strSQL, 'cDocs') Or Reccount("cDocs") = 0
-    Msg("NÃO EXISTEM DOCUMENTOS PARA ESTE CLIENTE!")
+If m.Escolheu
+
+	Select xVars
+	Locate
+	mDocumento=xVars.cValor
+	Select xVars
+	Skip
+	mDtIni=xVars.dValor
+	Select xVars
+	Skip
+	mDtFim=xVars.dValor
+	Select xVars
+	Skip
+	mEnviados=xVars.lValor
+
+	If Empty(mDocumento) Or datavazia(mDtIni) Or datavazia(mDtFim) Or mDtIni > mDtFim
+
+		mensagem('N o indicou todos os dados necess rios ou os mesmos s o inv lidos.','DIRECTA')
+
+		Return .F.
+
+	Endif
+	* config documentos, pdf doc eletronico
+	* Vai ler dados da TD
+
+	TEXT to mSel textmerge noshow
+
+		select ndoc from td (nolock) where nmdoc = '<<alltrim(mDocumento)>>'
+
+	ENDTEXT
+
+	If ! u_sqlexec(msel,'CrsTD')
+
+		mensagem('Estranho, n o consegui ler as configura  o dos documentos de fatura  o.','DIRECTA')
+
+		Return .F.
+
+	Endif
+
+	Select CrsTD
+
+	If Reccount('CrsTD') = 0
+
+		mensagem('Estranho, n o encontrei as configura  es para o documento escolhido.','DIRECTA')
+
+		Return .F.
+
+	Endif
+
+	* Vai ler os documentos para o intervalo indicado
+
+	TEXT to mSel textmerge noshow
+
+	select convert(varchar,ft.fdata,104) as fdata, ft.fdata as datasql, ft.nmdoc, ft.fno, ft.no, ft.nome, cl.email,	convert(bit,1) as marcada, ft.ftstamp
+	from ft (nolock)
+	inner join cl (nolock) on cl.no = ft.no
+	inner join ft2 (nolock) on ft.ftstamp = ft2.ft2stamp
+	where ft.anulado = 0 and ft.fno > 0 and ft.ndoc = <<astr(CrsTD.ndoc)>> and EXPEDICAO='T'
+	and ft.fdata >= '<<astr(dtosql(mDtIni)) >>' and fdata <= '<<astr(dtosql(mDtFim))>>'
+
+	ENDTEXT
+
+	If ! mEnviados
+
+		msel = msel + [ and rtrim(ft2.prodinis) = '' ]
+
+
+	Endif
+
+	msel = msel + [order by ft.fno desc]
+
+	If ! u_sqlexec(msel,'CrsFT')
+
+		mensagem('Falha ao consultar documentos. Por favor contacte servi os t cnicos.','DIRECTA')
+
+		Return .F.
+
+	Endif
+
+	If Reccount('CrsFT') = 0
+
+		If ! mEnviados
+
+			mensagem('N o encontrei documentos por enviar para o intervalo indicado.','DIRECTA')
+
+		Else
+
+			mensagem('N o encontrei documentos para o intervalo indicado.','DIRECTA')
+
+		Endif
+
+		Return .F.
+
+	Endif
+
+	Select CrsFT
+	=CursorSetProp("Buffering",5,"CrsFT")
+
+
+	Declare list_tit(7),list_cam(7),list_tam(7),list_pic(7),list_ronly(7)
+
+	list_tit(1)="Marcada"
+	list_tit(2)="Data"
+	list_tit(3)="Documento"
+	list_tit(4)="N "
+	list_tit(5)="Cliente"
+	list_tit(6)="Nome"
+	list_tit(7)="e-Mail"
+
+	list_cam(1)="CrsFT.marcada"
+	list_cam(2)="CrsFT.fdata"
+	list_cam(3)="CrsFT.nmdoc"
+	list_cam(4)="CrsFT.fno"
+	list_cam(5)="CrsFT.no"
+	list_cam(6)="CrsFT.nome"
+	list_cam(7)="CrsFT.email"
+
+	list_tam(1)=8*15
+	list_tam(2)=8*10
+	list_tam(3)=8*20
+	list_tam(4)=8*10
+	list_tam(5)=8*10
+	list_tam(6)=8*40
+	list_tam(7)=8*40
+
+	list_pic(1)="LOGIC"
+	list_pic(2)=""
+	list_pic(3)=""
+	list_pic(4)=""
+	list_pic(5)=""
+	list_pic(6)=""
+	list_pic(7)=""
+
+	list_ronly(1)=.F.
+	list_ronly(2)=.T.
+	list_ronly(3)=.T.
+	list_ronly(4)=.T.
+	list_ronly(5)=.T.
+	list_ronly(6)=.T.
+	list_ronly(7)=.T.
+
+	m.Escolheu=.F.
+
+	browlist("Envio de: "+Alltrim(mDocumento)+" entre "+Dtoc(mDtIni)+" e "+Dtoc(mDtFim),"CrsFT","CrsFT",.T.,.F.,.F.,.F.,.T.)
+
+	If m.Escolheu
+
+		Select CrsFT
+		Select * From CrsFT Where CrsFT.marcada = .T. Into Cursor CrsFTFinal Readwrite
+		Select CrsFTFinal
+
+		If Reccount('CrsFTFinal') = 0
+
+			mensagem('N o selecionou qualquer documento para envio.','DIRECTA')
+
+			Return .F.
+
+		Endif
+
+		* Verifica e carrega par metros de e-mail
+
+		msel = [select max(case when descricao='ge_smtpserver' then valor else '' end) srvSmtp, max(case when descricao='ge_portasmtp' then valor else '' end) portSmtp, ]
+		msel = msel + [max(case when descricao='ge_usersmtp' then valor else '' end) userSmtp, ]
+		msel = msel + [max(case when descricao='ge_passsmtp' then valor else '' end) passSmtp ]
+		msel = msel + [from para1 (nolock) ]
+
+		If ! u_sqlexec(msel,'CrsPara1')
+
+			mensagem('Estranho, n o consegui ler os par metros de envio de e-mail. Por favor, contacte servi os t cnicos.')
+
+			Return .F.
+
+		Endif
+
+		Select CrsPara1
+
+		If Empty(CrsPara1.srvSmtp) Or Empty(CrsPara1.portSmtp) Or Empty(CrsPara1.userSmtp) Or Empty(CrsPara1.passSmtp)
+
+			mensagem('Falta preencher par metros de envio de e-mail. Por favor, contacte servi os t cnicos.')
+
+			Return .F.
+
+		Endif
+
+		mOpenClient = .F.
+		mQuiet = .T.
+		**mDeEmail = Alltrim(CrsPara1.userSmtp)
+		**mbccEmail = Alltrim(CrsPara1.userSmtp)
+		mDeEmail = Alltrim(CrsPara1.userSmtp)
+		mbccEmail = Alltrim(CrsPara1.userSmtp)
+
+		********************** CONSTRU  O DO CORPO DO E-MAIL **************************************
+
+		TEXT TO mCabEmail TEXTMERGE NOSHOW
+		<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Ocean Movement</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link href="https://fonts.googleapis.com/css?family=Source+Sans+Pro" rel="stylesheet" type="text/css">
+</head>
+
+<body style="background-color: #ffffff; margin: 0; padding: 0; padding-bottom: 15px; -webkit-text-size-adjust: none; text-size-adjust: none;">
+<!--ENVIO DOC EM BRANCO-->
+	<table class="row row-1" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 545px;" width="545">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="66.66666666666667%" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-weight: 400; text-align: left; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:30px;padding-bottom:5px;">
+												<h1 style="margin: 0; color: #ffffff; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><span class="tinyMce-placeholder">Envio de Documento</span></h1>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--LOGOTIPO-->
+	<table class="nl-container" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row row-1" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+						<tbody>
+							<tr>
+								<td>
+									<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; color: #000000; width: 545px;" width="545">
+										<tbody>
+											<tr>
+												<td class="column column-1" width="100%" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-weight: 400; text-align: left; vertical-align: top; padding-top: 5px; padding-bottom: 5px; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+													<table class="image_block" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+														<tr>
+															<td style="width:100%;padding-right:0px;padding-left:0px;"align="center">
+																<div style="line-height:10px"><img src="C:\Users\dnascimento\Desktop\logo.jpg" style="display: block; height: auto; border: 0; width: 200px; max-width: 100%;" width="200" ></div><br><br><br>
+															</td>
+														</tr>
+													</table>
+												</td>
+											</tr>
+										</tbody>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--ENVIO DOCUMENTO-->
+	<table class="row row-2" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-size: auto;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-size: auto; background-color: #ffffff; color: #000000; width: 545px;" width="545">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="66.66666666666667%" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-weight: 400; text-align: left; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:5px;padding-bottom:5px;">
+												<h3 style="margin: 0; color: #3B3838; direction: ltr; font-family: Arial, Helvetica Neue, Helvetica, sans-serif; font-size: 14px; font-weight: 700; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><span class="tinyMce-placeholder">ENVIO DE DOCUMENTO</span></h3>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--1 LINHA-->
+	<div class=WordSection1>
+		<table class=MsoNormalTable border=0 align=center cellspacing=0 cellpadding=0 width=440 style='width:700px; background:white; border-collapse:collapse; mso-yfti-tbllook:1184; mso-padding-alt:0cm 0cm 0cm 0cm'>
+			<tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes'>
+				<td width=440 colspan=2 style='width:700px;border:none;border-bottom:solid #103592 1.0pt; mso-border-bottom-alt:solid #103592 .75pt;padding:0cm 0cm 3.0pt 0cm'>
+					<p class=MsoNormal><span style='text-align: center; font-size:10.5pt;font-family:"Arial",sans-serif; mso-fareast-font-family:"Times New Roman";color:#103592'><o:p>&nbsp;</o:p></span></p>
+				</td>
+			</tr>
+		</table>
+	</div>
+
+<!--1 PAR GRAFO-->
+	<table class="row row-4" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 545px;" width="545">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="66.66666666666667%" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:15px;padding-bottom:5px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-weight: 575; font-size: 15px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"></p>
+		ENDTEXT
+
+		TEXT TO mRodEmail TEXTMERGE NOSHOW
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--2 PARAGRAFO-->
+	<table class="row row-5" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="700px" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="700px" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:10px;padding-bottom:5px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 15px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><span class="tinyMce-placeholder">Para qualquer esclarecimento adicional, por favor contacte:&nbsp;</span><span style="font-size:15px; color: #3B3838"><a href="mailto:faturacao.porto@olano-groupe.com" target="_blank" rel="noopener noreferrer" data-auth="NotApplicable" data-linkindex="0">faturacao.porto@olano-groupe.com</a></span><span style="font-size:15px; color:#3B3838">&nbsp;&nbsp;|&nbsp;&nbsp;271&nbsp;200&nbsp;590</span></p>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--3 PARAGRAFO-->
+<table class="row row-5" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="700px" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="700px" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:20px;padding-bottom:5px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 15px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><i><span class="tinyMce-placeholder">Cumprimentos.</span></i></p>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--2 LINHA-->
+	<div class=WordSection1>
+		<table class=MsoNormalTable border=0 align=center cellspacing=0 cellpadding=0 width=440 style='width:700px; background:white; border-collapse:collapse; mso-yfti-tbllook:1184; mso-padding-alt:0cm 0cm 0cm 0cm'>
+			<tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes'>
+				<td width=440 colspan=2 style='width:700px;border:none;border-bottom:solid #103592 1.0pt; mso-border-bottom-alt:solid #103592 .75pt;padding:0cm 0cm 3.0pt 0cm'>
+					<p class=MsoNormal><span style='text-align: center; font-size:10.5pt;font-family:"Arial",sans-serif; mso-fareast-font-family:"Times New Roman";color:#103592'><o:p>&nbsp;</o:p></span></p>
+				</td>
+			</tr>
+		</table>
+	</div>
+
+<!--4 PARAGRAFO-->
+	<table class="row row-7" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="700px" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="700px" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:15px;padding-bottom:5px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 13px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><u><span class="tinyMce-placeholder">AVISO DE CONFIDENCIALIDADE</span></u><span style="font-size:13px; color:#3B3838;">:&nbsp;</span><span style="font-size:13px; color:#3B3838">Esta mensagem (Incluindo eventuais ficheiros anexos) pode conter informa  o confidencial ou privilegiada.</span></p>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--5 PARAGRAFO-->
+	<table class="row row-8" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="700px" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="700px" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:10px;padding-bottom:5px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 13px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><span class="tinyMce-placeholder">Se n o for o destinat rio pretendido, por favor contacte imediatamente o remetente por e-mail, e apague a mensagem do seu sistema inform tico.</span></p>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--6 PARAGRAFO-->
+	<table class="row row-9" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="700px" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="700px" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:30px;padding-bottom:5px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 14px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><b><span class="tinyMce-placeholder">PROTEJA O MEIO AMBIENTE. IMPRIMA APENAS OS DOCUMENTOS NECESS RIOS.</span></b></p>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--7 PARAGRAFO-->
+	<table class="row row-10" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff; color: #ffffff; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="700px" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="heading_block" width="700px" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td style="text-align:center;width:100%;padding-top:30px;padding-bottom:10px;">
+												<p style="margin: 0; color: #3B3838; direction: ltr; font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size: 14px; letter-spacing: normal; line-height: 120%; text-align: center; margin-top: 0; margin-bottom: 0;"><b><span class="tinyMce-placeholder">| POR FAVOR N O RESPONDA A ESTE E-MAIL |</span></b></p>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+<!--CAIXA-->
+	<table class="row row-11" align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+		<tbody>
+			<tr>
+				<td>
+					<table class="row-content stack" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #059b69; color: #000000; width: 700px;" width="700">
+						<tbody>
+							<tr>
+								<td class="column column-1" width="100%" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center; vertical-align: top; padding-top: 5px; padding-bottom: 5px; border-top: 0px; border-right: 0px; border-bottom: 0px; border-left: 0px;">
+									<table class="button_block" width="100%" border="0" cellpadding="10" cellspacing="0" role="presentation" style="mso-table-lspace: 0pt; mso-table-rspace: 0pt;">
+										<tr>
+											<td>
+												<div align="center">
+													<span style="font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size:13px; direction: ltr; color:#ffffff;">OCEAN MOVEMENT - LOGISTICA LDA </span><br>
+													<span style="font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size:13px; direction: ltr; color:#ffffff;">RUA 8 PORTA N 10 C RES DO CH O ERMIDAS SADO| 7565-119 ERMIDAS-SADO , Portugal</span><br>
+													<span style="font-family: 'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif; font-size:13px; direction: ltr; color:#ffffff;">+351&nbsp;271&nbsp;200&nbsp;590</span><br><br>
+													<span>
+														<!--EMAIL--><a href="mailto:faturacao.porto@olano-groupe.com" target="_blank" rel="noopener noreferrer" data-auth="NotApplicable" data-linkindex="6"><img width="3%" src="https://flaticons.net/custom.php?i=VWAU30t6mNZ0uWINIlI4atGBX49sB&format=png&size=256"></a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+														<!--WEBSITE--<a href="https://www.gefguarda.pt/" target="_blank" rel="noopener noreferrer" data-auth="NotApplicable" data-linkindex="6"><img width="3%" src="https://flaticons.net/custom.php?i=DaeFbPcOn3wJfwIgI7IpjC3RbVZUg&format=png&size=256"></a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+														<!--LOCALIZACAO--><a href="https://www.google.pt/maps/place/R.+8,+Ermidas+do+Sado/@38.0061169,-8.4175764,20.75z/data=!4m10!1m2!2m1!1s+Rua+8,+Porta+N%C2%BA+10+-+C,+R%C3%A9s-Do-Ch%C3%A3o,+Ermidas-Sado+7565-119+Ermidas-Sado!3m6!1s0xd1a4a72c4cf5089:0xa45d3cc27912dd17!8m2!3d38.0061472!4d-8.4174192!15sCkpSdWEgOCwgUG9ydGEgTsK6IDEwIC0gQywgUsOpcy1Eby1DaMOjbywgRXJtaWRhcy1TYWRvIDc1NjUtMTE5IEVybWlkYXMtU2Fkb5IBBXJvdXRl4AEA!16s%2Fg%2F1tjwj_y3?hl=pt-PT&entry=ttu&g_ep=EgoyMDI0MDkyNS4wIKXMDSoASAFQAw%3D%3D" target="_blank" rel="noopener noreferrer" data-auth="NotApplicable" data-linkindex="6"><img width="3%" src="https://flaticons.net/icon.php?slug_category=mobile-application&slug_icon=location-marker"></a>
+													</span>
+												</div>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+
+</body>
+
+</html>
+		ENDTEXT
+
+		Create Cursor crsResultado  ( mnresultado c(254))
+
+		Select CrsTD
+
+		mNDoc = CrsTD.ndoc
+
+		Do tdread With "",mNDoc
+
+		If Not Used("FT")
+			Do dbfuseft
+		Endif
+
+		If Not Used("FT2")
+			Do dbfuseft2
+		Endif
+
+		If Not Used("FT3")
+			Do dbfuseft3
+		Endif
+
+		If Not Used("FI")
+			Do dbfusefi
+		Endif
+
+		** limpar as views
+		v_ftstamp="-+-"
+		u_requery("FT")
+
+		v_ft2ftstamp="-+-"
+		u_requery("FT2")
+
+		v_ft3ftstamp="-+-"
+		u_requery("FT3")
+
+		v_fiftstamp="-+-"
+		u_requery("FI")
+
+		If Not(Used("ftlist"))
+			Create Cursor ftlist( ftstamp c(25), fdata d(8), fno N(10, 0), etotal N(ch_eurint, ch_eurdec), nmdoc c(24), Nome c(55), no N(10,0), estab N(3,0))
+		Endif
+
+		mErro = .F.
+
+		**Define a diretoria provis ria para o pdf
+		Try
+
+			mDir = Sys(5)+Sys(2003)+'\export'
+
+			If Not Directory(mDir)
+
+				Md (mDir)
+
+			Endif
+
+		Catch To ex
+
+			mErro = .T.
+
+			mensagem('N o foi poss vel definir a diretoria para armazenar os ficheiros PDF. Envio interrompido.')
+
+		Endtry
+
+		If ! mErro
+
+			Select CrsFTFinal
+
+			regua(0, Reccount('CrsFTFinal'),"A enviar documentos.")
+
+			Scan
+
+				**Verifica se o cliente tem o campo do e-mail para documentos electronicos preenchido
+
+				**msel = [SELECT cl.bizzaddress from cl (nolock) where cl.no = ]+astr(CrsFTFinal.no)
+
+
+
+				**If ! u_sqlexec(msel,'CrsCliente')
+				If 	Empty(CrsFTFinal.email)
+
+					Select crsResultado
+					Append Blank
+					Replace crsResultado.mnresultado With 'O Cliente N  '+astr(CrsFTFinal.no)+' n o tem e-mail na ficha de cliente.'
+
+				Else
+
+					*!* If Alltrim(CrsCliente.bizzaddress) == ''
+
+					*!* Select crsResultado
+					*!* Append Blank
+					*!* Replace crsResultado.mnresultado With 'O Cliente N  '+astr(CrsFTFinal.no)+' n o tem e-mail na ficha de cliente para documentos electronicos.'
+
+					*!* Else
+
+					regua[1,recno('CrsFTFinal'),'A enviar '+alltrim(CrsFTFinal.nmdoc)+' N  '+astr(mNDoc)+' / '+astr(CrsFTFinal.fno)]
+
+					v_ftstamp= CrsFTFinal.ftstamp
+					u_requery("FT")
+
+					v_ft2ftstamp= CrsFTFinal.ftstamp
+					u_requery("FT2")
+
+					v_ft3ftstamp= CrsFTFinal.ftstamp
+					u_requery("FT3")
+
+					v_fiftstamp= CrsFTFinal.ftstamp
+					u_requery("FI")
+
+					Select ftlist
+					Delete All
+					Append Blank
+					Replace ftlist.ftstamp With CrsFTFinal.ftstamp
+
+					mNomeFicheiro = Alltrim(CrsFTFinal.nmdoc)+'_'+astr(CrsFTFinal.fno)+'_'+'.pdf' 
+					mFicheiro = mDir+'\'+ mNomeFicheiro
+
+
+
+					msel = "select titulo from ftiduc where idustamp='ADM24032558037,900490076' "
+
+					If ! u_sqlexec(msel,'CrsIdu')
+
+						mensagem('Estranho, n o consegui ler o IDU por defeito. Por favor, contacte servi os t cnicos.')
+
+						Return .F.
+
+					Endif
+
+					**mTitulo = CrsTD.idudescdocdig
+					mTitulo = Alltrim(CrsIdu.titulo)
+
+
+
+					mResultado = IduToPdf("FT","FI","FTCAMPOS","FICAMPOS","FTIDUC","FTIDUL",mNDoc,mTitulo,mFicheiro,"","NO",.T.,"ONETOMANY",'',1,1,1,.T.)
+					* se tiver assinaturas mudar para .T.
+					If ! Empty(mResultado)
+
+						mensagem('Falha ao criar ficheiro PDF. Por favor contacte servi os t cnicos.','DIRECTA')
+
+						Return .F.
+
+					Endif
+
+					TEXT TO mLinEmail TEXTMERGE NOSHOW
+<p style="text-align:center;"><span style="font-size:14px;font-family:'Source Sans Pro', Tahoma, Verdana, Segoe, sans-serif;color:#3B3838;">Estimado cliente, segue em anexo N/
+					ENDTEXT
+
+					mLinEmail = mLinEmail + Alltrim(CrsFTFinal.nmdoc)+' N  '+astr(mNDoc)+' / '+astr(CrsFTFinal.fno)+'.</span></p>'
+
+					mAssunto = 'Envio de N/' + Alltrim(CrsFTFinal.nmdoc)+' N  '+astr(mNDoc)+' / '+astr(CrsFTFinal.fno)
+
+					mEmail = mCabEmail + mLinEmail + mRodEmail
+
+					If !u_sendmailhtml(Alltrim(CrsFTFinal.email)+';bcc:'+mbccEmail, mAssunto, mEmail, mFicheiro, mOpenClient, mQuiet, '', mDeEmail, CrsPara1.srvSmtp, CrsPara1.userSmtp, CrsPara1.passSmtp, CrsPara1.portSmtp, 1) = 0
+
+						Select crsResultado
+						Append Blank
+						Replace crsResultado.mnresultado With 'O e-mail relativo a '+Alltrim(CrsFTFinal.nmdoc)+' N  '+astr(mNDoc)+' / '+astr(CrsFTFinal.fno) +' n o foi enviado.'
+
+					Else
+						* Atualiza o documento com os dados de envio
+						mData = Date()
+						mHora = Time()
+
+						msel = [update ft2 set proddata = ']+dtosql(mData)+[', envdata = ']+dtosql(mData)+[', prodhora = ']+Alltrim(mHora)+[', envhora = ']+Alltrim(mHora)+[', prodinis = ']+Alltrim(m.m_chinis)+[', envinis = ']+Alltrim(m.m_chinis)+[' ]
+						msel = msel + [where ft2stamp = ']+Alltrim(CrsFTFinal.ftstamp)+[']
+
+						If ! u_sqlexec(msel)
+
+							Select crsResultado
+							Append Blank
+							Replace crsResultado.mnresultado With 'N o foi poss vel atualizar o documento '+Alltrim(CrsFTFinal.nmdoc)+' N  '+astr(mNDoc)+' / '+astr(CrsFTFinal.fno) +' com os dados de envio.'
+
+						Endif
+
+						**Endif
+
+					Endif
+
+				Endif
+
+			Endscan
+
+			regua(2)
+
+			Select crsResultado
+			Append Blank
+			Replace crsResultado.mnresultado With 'OK! Terminado'
+
+			Declare list_tit(1),list_cam(1),list_tam(1),list_pic(1),list_ronly(1)
+
+			list_tit(1)="Resultado"
+
+			list_cam(1)="crsResultado.mnresultado"
+
+			list_tam(1)=8*200
+
+			list_pic(1)=""
+
+			list_ronly(1)=.T.
+
+			m.Escolheu=.F.
+
+			browlist("Resultado de Envio de: "+Alltrim(mDocumento)+" entre "+Dtoc(mDtIni)+" e "+Dtoc(mDtFim),"crsResultado","crsResultado",.F.,.F.,.F.,.F.,.T.)
+
+			**Apaga a diretoria e todos os ficheiros que contem
+			Try
+
+				Delete File (mDir + '\*.*')
+				Rmdir (mDir)
+
+			Catch To ex
+
+				mErro = .T.
+
+				mensagem('N o foi poss vel apagar a diretoria de armazenamento dos ficheiros PDF. No entanto o envio foi efetuado.')
+
+			Endtry
+
+		Endif
+
+	Endif
+
 Endif
-
-* ... Resto do código para gerar PDF e enviar email permanece igual ...
