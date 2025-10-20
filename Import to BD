@@ -1,0 +1,71 @@
+-- Exemplo para SQL Server
+
+USE [WDRETAIL];
+GO
+
+-- Gerar e inserir os registos na tabela ST
+INSERT INTO dbo.ST (
+    ststamp,
+    ref,
+    design,
+    familia,
+    stock,
+    epv1,
+    pv1,
+    fornecedor,
+    desc1,
+    usr1,
+    validade,
+    unidade
+    -- adiciona mais colunas conforme necessário
+)
+SELECT
+    'SD' + CONVERT(VARCHAR(6), GETDATE(), 12) + RIGHT('00000' + CAST(ABS(CHECKSUM(NEWID())) % 99999 AS VARCHAR(5)), 5) AS ststamp,
+    ref,
+    design,
+    familia,
+    stock,
+    epv1,
+    pv1,
+    fornecedor,
+    desc1,
+    usr1,
+    validade,
+    unidade
+FROM [phc_wd].dbo.ST;
+GO
+
+
+-- Agora, gerar os registos em STOBS ligados à ST
+INSERT INTO dbo.STOBS (
+    stobsstamp,
+    ref,
+    stobs,
+    lepeso,
+    precotouch,
+    pvverificador,
+    objusacor,
+    objcolor,
+    objcortit,
+    objcorval,
+    ousrinis,
+    usrdata,
+    usrhora
+)
+SELECT
+    'SD' + CONVERT(VARCHAR(6), GETDATE(), 12) + RIGHT('00000' + CAST(ABS(CHECKSUM(NEWID())) % 99999 AS VARCHAR(5)), 5) AS stobsstamp,
+    s.ref,
+    o.stobs,
+    o.lepeso,
+    o.precotouch,
+    o.pvverificador,
+    o.objusacor,
+    o.objcolor,
+    o.objcortit,
+    o.objcorval,
+    o.ousrinis,
+    o.usrdata,
+    o.usrhora
+FROM [phc_wd].dbo.STOBS o
+JOIN [WDRETAIL].dbo.ST s ON s.ref = o.ref;
+GO
