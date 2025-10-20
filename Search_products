@@ -1,0 +1,141 @@
+If mexendo('BO',.T.)
+	* Cria o cursor "u_dados"
+	Create Cursor u_dados(simnao L(1),ref C(18),armazem N(3), stock N(10.3),Lote C(30),dtval D(10),Design C(200),tabiva N(3),unidade C(5),epv1 N(10.3),u_stock2 N(10.3))
+
+	Declare list_tit(10),list_cam(10),list_tam(10),list_pic(10),list_ronly(10),list_rot(10),list_ali(10)
+
+	list_tit(1)="Seleccionar"
+	list_tit(2)="Referencia"
+	list_tit(3)="Armazem"
+	list_tit(4)="Stock"
+	list_tit(5)="Lote"
+	list_tit(6)="Validade"
+	list_tit(7)="Designacao"
+	list_tit(8)="Tab Iva"
+	list_tit(9)="Unidade"
+	list_tit(10)="Qtt Pretendida"
+
+	list_cam(1)="u_dados.simnao"
+	list_cam(2)="u_dados.ref"
+	list_cam(3)="u_dados.armazem"
+	list_cam(4)="u_dados.stock"
+	list_cam(5)="u_dados.lote"
+	list_cam(6)="u_dados.dtval"
+	list_cam(7)="u_dados.design"
+	list_cam(8)="u_dados.tabiva"
+	list_cam(9)="u_dados.unidade"
+	list_cam(10)="u_dados.u_stock2"
+
+	list_pic(1)='LOGICO'
+	list_pic(2)=''
+	list_pic(3)=''
+	list_pic(4)='###,###.###'
+	list_pic(5)=''
+	list_pic(6)=''
+	list_pic(7)=''
+	list_pic(8)='###,###.###'
+	list_pic(9)=''
+	list_pic(10)='###,###.###'
+
+	list_tam(1)=5
+	list_tam(2)=30
+	list_tam(3)=30
+	list_tam(4)=30
+	list_tam(5)=30
+	list_tam(6)=12
+	list_tam(7)=120
+	list_tam(8)=30
+	list_tam(9)=5
+	list_tam(10)=15
+
+	list_ali(1) = 0
+	list_ali(2) = 1
+	list_ali(3) = 0
+	list_ali(4) = 1
+	list_ali(5) = 0
+	list_ali(6) = 0
+	list_ali(7) = 0
+	list_ali(8) = 0
+	list_ali(9) = 0
+	list_ali(10) = 1
+
+	list_ronly(1)=.F.
+	list_ronly(2)=.T.
+	list_ronly(3)=.T.
+	list_ronly(4)=.T.
+	list_ronly(5)=.T.
+	list_ronly(6)=.T.
+	list_ronly(7)=.T.
+	list_ronly(8)=.T.
+	list_ronly(9)=.T.
+	list_ronly(10)=.F.
+
+	list_rot(1)=""
+	list_rot(2)=""
+	list_rot(3)=""
+	list_rot(4)=""
+	list_rot(5)=""
+	list_rot(6)=""
+	list_rot(7)=""
+	list_rot(8)=""
+	list_rot(9)=""
+	list_rot(10)=""
+
+	Select bi
+
+	If u_sqlexec("select cast(0 as bit) as incluir,sal.ref,sal.armazem,sal.stock,sal.lote,sal.ousrdata,st.design,st.tabiva,st.unidade,st.epv1,sal.stock as u_stock2 from sal (nolock) inner join st on st.ref=sal.ref where sal.ref='"+bi.ref+"'", "tmpcursor")
+
+		Select tmpcursor
+		If Reccount("tmpcursor")>0
+			Scan
+				Insert Into u_dados Values (tmpcursor.incluir,tmpcursor.ref, tmpcursor.armazem,tmpcursor.stock,tmpcursor.Lote,tmpcursor.ousrdata,tmpcursor.Design,tmpcursor.tabiva,tmpcursor.unidade,tmpcursor.epv1,tmpcursor.u_stock2)
+			Endscan
+
+		Else
+			mensagem("Não existe stock deste artigo!","DIRECTA")
+			Return
+		Endif
+
+
+	Else
+		mensagem("Erro SQL!!!","DIRECTA")
+		Return
+	Endif
+
+
+=CursorSet('Buffering',5,"u_dados")
+m.escolheu = .T.
+browlist("Escolha os dados a Utilizar","u_dados","ficonsultaprecos",.T.,.F.,.F.,.F.,.F.,' ',.T.)
+
+If m.escolheu
+	Select bi
+	Delete
+	Select u_dados
+	Scan
+		If u_dados.simnao=.T.
+			Do boine2in
+			Replace bistamp With Alltrim(m_chinis)+Sys(2015)
+			Replace bi.ref With u_dados.ref
+			Replace bi.Design With u_dados.Design
+			Replace bi.qtt With u_dados.u_stock2
+			Replace bi.tabiva With u_dados.tabiva
+			Replace bi.Lote With u_dados.Lote
+			Replace bi.armazem With u_dados.armazem
+			Replace bi.unidade With u_dados.unidade
+			Replace bi.edebito With u_dados.epv1
+		Endif
+	Endscan
+	*		Do u_boiliq With .F.,.F.,.F.,"ft", "fi"
+	Do botots With .T.
+	sbo.Refresh()
+	sbo.doactualizar()
+	sbo.localrefrescar()
+	Select bo
+	Do botots With .T.
+	sbo.Refresh()
+	sbo.doactualizar()
+	sbo.localrefrescar()
+Endif
+fecha("tmpcursor")
+fecha("u_dados")
+Endif
