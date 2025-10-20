@@ -1,0 +1,61 @@
+Local mycl2
+text to mycl2 NOSHOW TEXTMERGE
+select cl.local as ville, cl2.codpais as pays, cl.morada as addresse1, cl.codpost ascodepostal, 
+cl.no as codclient,cl.nome as libellé, cl.no as clientgroupkey, cl.telefone as téléphone, 
+{fn CONCAT(ISNULL(cl.pncont, ''), ISNULL(cl.ncont, ''))} as NIF, cl.cobtacto as perso1 from 
+cl2(nolock) inner join cl on cl.clstamp=cl2.cl2stamp where cl.inactivo='0' and cl.tipo<>'Cobrança Duvidosa' and cl.tipo<>'FUNCIONARIO' and cl.tipo<>'Encontro de Contas' 
+ENDTEXT
+If u_sqlexec(mycl2,"mycl2final")
+select mycl2final
+export to \\192.168.200.3\exporta\clients type xl5
+endif
+
+TEXT to mycc2 NOSHOW TEXTMERGE
+select cc.no as codclient, ((cc.edeb-cc.edebf)-(cc.ecred-cc.ecredf)) as mttdebit, cc.ecred-cc.ecredf as mttcredit, (CASE WHEN cc.moeda like '%eur%' THEN 'EUR' END) as devise, cc.datalc as date_emission, DATEADD(DAY,cl.vencimento,cc.datalc) as date_enchence_calc,
+cc.nrdoc as nopiece, (CASE WHEN cc.cmdesc = 'N/Factura' THEN 'FC' when cc.cmdesc = 'N/Nt. Crédito' then 'AC' when cc.cmdesc = 'Aviso Lançamento' then 'OD'
+when cc.cmdesc = 'N/Nt. Débito' then 'OD' when cc.cmdesc = 'N/Factura VD' then 'FC' else cc.cmdesc END ) as typepiece from cc
+inner join cl on cc.no=cl.no
+where cl.inactivo='0' and cl.tipo<>'Cobrança Duvidosa' and cl.tipo<>'FUNCIONARIO' and cl.tipo<>'Encontro de Contas' and (case when cc.moeda like '%eur%' then abs((cc.edeb-cc.edebf)-(cc.ecred-cc.ecredf))
+else abs((cc.debm-cc.debfm)-(cc.credm-cc.credfm)) end) > (case when cc.moeda like '%eur%' then 0.010000 else 0 end)
+group by cc.no,cc.cmdesc,cc.nrdoc,cc.datalc,cc.dataven,cc.edeb,cc.edebf,cc.ecred,cc.ecredf,cc.moeda, cl.vencimento order by datalc
+ENDTEXT
+If u_sqlexec(mycc2,"mycc2final")
+	Select mycc2final
+	Export To \\192.168.200.3\exporta\itemclients Type Xl5
+	
+Endif
+
+
+	
+* Caminho original do BAT na rede
+lcBatSource = "\\\\192.168.200.3\\ftp\\enviar_ftp.bat"
+
+* Caminho local para executar (sempre C:\Temp)
+lcBatLocal = "C:\Temp\enviar_ftp.bat"
+
+* Garante que a pasta C:\Temp existe
+IF NOT DIRECTORY("C:\Temp")
+    MD "C:\Temp"
+ENDIF
+
+* Copia sempre o ficheiro da rede para C:\Temp
+COPY FILE (lcBatSource) TO (lcBatLocal)
+
+* Remove qualquer flag de bloqueio (sem usar PowerShell)
+* Método alternativo: apenas sobrescrevendo no disco local, o Windows já não marca como remoto.
+
+* Criar VBS para executar BAT de forma oculta
+lcVbsFile = "C:\Temp\run_hidden.vbs"
+lcVbsContent = ;
+    'CreateObject("Wscript.Shell").Run "cmd.exe /c ""C:\Temp\enviar_ftp.bat""", 0, True'
+
+* Grava o VBS
+STRTOFILE(lcVbsContent, lcVbsFile)
+
+* Declara ShellExecute se ainda não estiver declarado
+DECLARE INTEGER ShellExecute IN SHELL32.DLL ;
+    INTEGER hWnd, STRING lpOperation, STRING lpFile, ;
+    STRING lpParameters, STRING lpDirectory, INTEGER nShowCmd
+
+* Executa o VBS com wscript.exe sem abrir janela
+ShellExecute(0, "open", "wscript.exe", lcVbsFile, "", 0)
