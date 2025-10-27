@@ -1,0 +1,51 @@
+cAvisos = ""  && acumula artigos com stock baixo
+
+Select fi
+If Reccount() = 0
+    =MessageBox("A tabela fi não tem registos.", 48, "Erro")
+    Return .F.
+Endif
+
+Scan
+    If Empty(Alltrim(fi.ref))
+        Continue
+    Endif
+
+    * Consulta stock e STNS da tabela ST
+    cSql = [SELECT stock, STNS FROM st (NOLOCK) WHERE ref = '] + Alltrim(fi.ref) + [']
+    
+
+    If u_sqlexec(cSql, "temp")
+        Select temp
+        If Reccount() > 0
+            Go Top
+
+            * Verifica se STNS = 0
+            If !temp.STNS  && verdadeiro quando STNS = 0
+
+                nStockRestante = temp.stock - fi.qtt
+
+                * Se stock restante <= 1, adiciona à lista de avisos
+                If nStockRestante <= 1
+                    cAvisos = cAvisos + "Artigo: " + Alltrim(fi.design) + ;
+                              " | Stock atual: " + Alltrim(Str(temp.stock)) + ;
+                              " | Qtd pedida: " + Alltrim(Str(fi.qtt)) + ;
+                              " | Stock restante: " + Alltrim(Str(nStockRestante)) + CHR(13)+CHR(10)
+                Endif
+
+            Endif
+        Else
+            ? "Artigo não encontrado na tabela ST: " + Alltrim(fi.ref)
+        Endif
+    Else
+        ? "Erro ao executar query: " + cSql
+    Endif
+Endscan
+
+* Se houver algum artigo com stock crítico, mostra alerta e retorna .F.
+If !Empty(cAvisos)
+    =MessageBox("Atenção! Estes artigos ficarão com stock baixo após a venda (Avisar Sandra):" + CHR(13)+CHR(10) + cAvisos, 48, "Aviso de Stock")
+    Return .F.
+Endif
+
+Return .T.  && Todos os artigos têm stock suficiente
